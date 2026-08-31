@@ -1,78 +1,112 @@
 #!/usr/bin/env python3
-"""Conecta tu cuenta de Garmin Connect a esta computadora.
+"""Vincula tu cuenta de Garmin Connect con esta computadora.
 
-IMPORTANTE: ejecuta este script en TU terminal local, no lo pegues en
-un chat. Pide el email y la contraseña de forma interactiva (la
-contraseña con getpass, así que no se muestra en pantalla ni queda en
-el historial de la shell) y los usa solo para autenticarte contra los
-servidores de Garmin a través de la librería python-garminconnect.
+Ejecuta este script en tu propia terminal (no lo pegues en un chat).
+Te pedirá tu email y, con `getpass`, tu contraseña de forma oculta:
+nunca se imprime en pantalla, no queda en el historial de la shell y
+no se envía a ningún sitio salvo a los servidores de Garmin, a través
+de la librería `python-garminconnect`.
 
-Tras el primer login exitoso, la sesión (tokens OAuth) se guarda en
-~/.garminconnect, así que las próximas veces no hará falta volver a
-escribir la contraseña.
+Si tu cuenta usa verificación en dos pasos (MFA), el script te pedirá
+el código cuando Garmin lo solicite.
+
+Una vez que el login funciona, la sesión (tokens OAuth, no tu
+contraseña) se guarda en el directorio indicado por TOKEN_STORE para
+que las próximas ejecuciones no vuelvan a pedirte la contraseña.
 """
+
+from __future__ import annotations
+
 import getpass
 import os
 import sys
 
-from garminconnect import (
-    Garmin,
-    GarminConnectAuthenticationError,
-    GarminConnectConnectionError,
-    GarminConnectTooManyRequestsError,
-)
+try:
+    from garminconnect import (
+        Garmin,
+        GarminConnectAuthenticationError,
+        GarminConnectConnectionError,
+        GarminConnectTooManyRequestsError,
+    )
+except ImportError:
+    sys.exit(
+        "Falta instalar las dependencias. Ejecuta primero:\n"
+        "  pip install -r requirements.txt"
+    )
 
 TOKEN_STORE = os.path.expanduser("~/.garminconnect")
 
 
-def prompt_mfa() -> str:
-    return input("Código de verificación en 2 pasos (MFA), si tu cuenta lo pide: ").strip()
+def leer_codigo_mfa() -> str:
+    return input("Código de verificación en dos pasos (MFA): ").strip()
+
+
+def iniciar_sesion() -> Garmin:
+    """Reutiliza la sesión guardada o pide credenciales por terminal."""
+    client = Garmin()
+    try:
+        client.login(TOKEN_STORE)
+        print(f"Sesión reutilizada desde {TOKEN_STORE}.\n")
+        return client
+    except Exception:
+        pass  # No hay sesión guardada (o expiró); se pide login normal.
+
+    email = os.environ.get("GARMIN_EMAIL") or input("Email de Garmin Connect: ").strip()
+    password = os.environ.get("GARMIN_PASSWORD") or getpass.getpass(
+        "Contraseña de Garmin Connect (no se mostrará): "
+    )
+
+    client = Garmin(email=email, password=password, prompt_mfa=leer_codigo_mfa)
+    # login(TOKEN_STORE) hace el login con las credenciales y, si tiene
+    # éxito, guarda los tokens de sesión (no la contraseña) en TOKEN_STORE.
+    client.login(TOKEN_STORE)
+    print(f"\nLogin correcto. Sesión guardada en {TOKEN_STORE}.")
+    return client
+
+
+def mostrar_dispositivos(client: Garmin) -> None:
+    try:
+        nombre = client.get_full_name()
+        print(f"Cuenta conectada: {nombre}")
+    except Exception:
+        pass
+
+    try:
+        dispositivos = client.get_devices()
+    except Exception as err:
+        print(f"No se pudo obtener la lista de dispositivos: {err}", file=sys.stderr)
+        return
+
+    if not dispositivos:
+        print(
+            "\nNo hay dispositivos vinculados a esta cuenta todavía.\n"
+            "Sincroniza tu reloj al menos una vez con la app Garmin Connect "
+            "(móvil o de escritorio) y vuelve a ejecutar este script."
+        )
+        return
+
+    print("\nRelojes/dispositivos vinculados a tu cuenta de Garmin:")
+    for dispositivo in dispositivos:
+        nombre = (
+            dispositivo.get("productDisplayName")
+            or dispositivo.get("displayName")
+            or "Dispositivo desconocido"
+        )
+        device_id = dispositivo.get("deviceId", "?")
+        print(f"  - {nombre} (id: {device_id})")
 
 
 def main() -> None:
-    email = os.getenv("GARMIN_EMAIL")
-    if not email:
-        email = input("Email de Garmin Connect: ").strip()
-
-    password = os.getenv("GARMIN_PASSWORD")
-    if not password:
-        password = getpass.getpass("Contraseña de Garmin Connect (no se mostrará): ")
-
-    client = Garmin(email, password, prompt_mfa=prompt_mfa)
-
     try:
-        client.login(TOKEN_STORE)
+        client = iniciar_sesion()
     except (
         GarminConnectAuthenticationError,
         GarminConnectConnectionError,
         GarminConnectTooManyRequestsError,
     ) as err:
-        print(f"\nNo se pudo conectar con Garmin Connect: {err}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"No se pudo conectar con Garmin Connect: {err}")
 
-    print("\nConexión establecida con Garmin Connect.")
-    print(f"  Sesión guardada en: {TOKEN_STORE} (para no pedir la contraseña la próxima vez)")
-
-    try:
-        print(f"  Cuenta: {client.get_full_name()}")
-    except Exception:
-        pass
-
-    try:
-        devices = client.get_devices()
-    except Exception as err:
-        print(f"\nNo se pudo obtener la lista de dispositivos: {err}", file=sys.stderr)
-        return
-
-    if devices:
-        print("\nRelojes/dispositivos vinculados a tu cuenta de Garmin:")
-        for d in devices:
-            model = d.get("productDisplayName") or d.get("displayName") or "Dispositivo desconocido"
-            device_id = d.get("deviceId", "?")
-            print(f"  - {model} (id: {device_id})")
-    else:
-        print("\nNo se encontraron dispositivos vinculados a esta cuenta de Garmin Connect.")
-        print("Verifica que tu reloj esté sincronizado con la app Garmin Connect al menos una vez.")
+    mostrar_dispositivos(client)
 
 
 if __name__ == "__main__":
