@@ -45,6 +45,25 @@ def prompt_mfa() -> str:
     return input("2FA / verification code from Garmin: ").strip()
 
 
+def is_rate_limited(err) -> bool:
+    text = str(err).lower()
+    return any(s in text for s in ("429", "rate limit", "cloudflare", "too many request"))
+
+
+def explain_login_failure(err) -> str:
+    if is_rate_limited(err):
+        return (
+            "Garmin's servers are temporarily blocking login attempts for this "
+            "account (their own anti-bot protection, not a problem with this "
+            "script or your password). This clears up on its own -- don't keep "
+            "retrying right away, since that can make it last longer. Wait a few "
+            "hours (or until tomorrow if it's still blocked) and run this again. "
+            "If it's still blocked after that, try once from a different network "
+            "(e.g. your phone's hotspot) and make sure no VPN is active."
+        )
+    return f"Could not log in to Garmin Connect: {err}"
+
+
 def get_client() -> Garmin:
     have_saved_session = os.path.exists(TOKEN_STORE)
     interactive = sys.stdin.isatty()
@@ -70,17 +89,21 @@ def get_client() -> Garmin:
     try:
         client.login(TOKEN_STORE)
     except (GarminConnectAuthenticationError, GarminConnectConnectionError) as err:
-        if have_saved_session and interactive and not (email and password):
+        if have_saved_session and interactive and not (email and password) and not is_rate_limited(err):
             print("Saved session expired or was rejected. Please log in again.")
             email = input("Garmin email: ").strip()
             password = getpass.getpass("Garmin password (hidden, not shown or saved): ")
             client = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
-            client.login(TOKEN_STORE)
+            try:
+                client.login(TOKEN_STORE)
+            except (GarminConnectAuthenticationError, GarminConnectConnectionError) as err2:
+                print(explain_login_failure(err2), file=sys.stderr)
+                sys.exit(1)
         else:
-            print(f"Could not log in to Garmin Connect: {err}", file=sys.stderr)
+            print(explain_login_failure(err), file=sys.stderr)
             sys.exit(1)
     except GarminConnectTooManyRequestsError as err:
-        print(f"Garmin is rate-limiting login attempts, try again later: {err}", file=sys.stderr)
+        print(explain_login_failure(err), file=sys.stderr)
         sys.exit(1)
 
     return client
