@@ -10,7 +10,7 @@ escritorio) para que aparezca vinculado a tu cuenta.
 
 ## Requisitos
 
-- Python 3.9 o superior
+- Python 3.12 o superior (es el mínimo que exige `python-garminconnect`)
 - Una cuenta de Garmin Connect con el reloj ya vinculado
 
 ## Instalación
