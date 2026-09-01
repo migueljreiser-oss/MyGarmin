@@ -31,6 +31,17 @@ Your password is never saved anywhere. After the first successful login, a
 session token is saved to `~/.garminconnect` (outside this project folder)
 so future runs don't ask for your password again.
 
+### Windows
+
+Paste this into PowerShell instead:
+
+```powershell
+irm https://raw.githubusercontent.com/migueljreiser-oss/MyGarmin/claude/garmin-watch-connection-kc6cps/bootstrap.ps1 | iex
+```
+
+It does the same steps, installing Python 3.12+ via `winget` if needed and
+setting the project up in `%USERPROFILE%\garmin-ai`.
+
 ## Running it again later
 
 ```bash
